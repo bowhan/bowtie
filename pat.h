@@ -20,6 +20,7 @@
 #include "hit_set.h"
 #include "search_globals.h"
 
+#include <zlib.h>
 /**
  * Classes and routines for reading reads from various input sources.
  */
@@ -1650,9 +1651,17 @@ protected:
 		if(qfb_.isOpen()) qfb_.close();
 		while(filecur_ < infiles_.size()) {
 			// Open read
-			FILE *in;
+			FILE *in = NULL;
+			gzFile* gzin = new gzFile; // TODO: to delete this...
 			if(infiles_[filecur_] == "-") {
 				in = stdin;
+			} else if (infiles_[filecur_].substr (infiles_[filecur_].size() - 3) == ".gz") { // reading .gz file
+			 	*gzin = gzopen (infiles_[filecur_].c_str(), "r");
+				if (*gzin == Z_NULL) {
+					cerr << "cannot gzopen file " << infiles_[filecur_] << endl;
+					exit (1);
+				}
+				fb_.newFile(gzin);
 			} else if((in = fopen(infiles_[filecur_].c_str(), "rb")) == NULL) {
 				if(!errs_[filecur_]) {
 					cerr << "Warning: Could not open read file \"" << infiles_[filecur_] << "\" for reading; skipping..." << endl;
@@ -1661,8 +1670,8 @@ protected:
 				filecur_++;
 				continue;
 			}
-			fb_.newFile(in);
-			// Open quality
+			if (in) fb_.newFile(in);
+			// Open quality /// not gonna support gzip for separated quality file...
 			if(!qinfiles_.empty()) {
 				FILE *in;
 				if(qinfiles_[filecur_] == "-") {
@@ -2551,7 +2560,8 @@ protected:
 					if(c < 0) { bail(r); return; }
 				}
 				if(c != '@') {
-					cerr << "Error: reads file does not look like a FASTQ file" << endl;
+					cerr << c << " Error: reads file does not look like a FASTQ file" << endl;
+					
 					throw 1;
 				}
 				assert_eq('@', c);

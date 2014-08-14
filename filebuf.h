@@ -15,6 +15,7 @@
 #include <stdexcept>
 #include "assert_helpers.h"
 
+#include "zlib.h"
 /**
  * Simple wrapper for a FILE*, istream or ifstream that reads it in
  * chunks (with fread) and keeps those chunks in a buffer.  It also
@@ -45,8 +46,13 @@ public:
 		assert(_ins != NULL);
 	}
 
+	FileBuf(gzFile* gzin) {
+		init ();
+		_gzin = gzin;
+		assert(_gzin!=NULL);
+	}
 	bool isOpen() {
-		return _in != NULL || _inf != NULL || _ins != NULL;
+		return _in != NULL || _inf != NULL || _ins != NULL || _gzin!=NULL;
 	}
 
 	/**
@@ -58,6 +64,7 @@ public:
 		} else if(_inf != NULL) {
 			_inf->close();
 		} else {
+			gzclose(*_gzin);
 			// can't close _ins
 		}
 	}
@@ -66,7 +73,7 @@ public:
 	 * Get the next character of input and advance.
 	 */
 	int get() {
-		assert(_in != NULL || _inf != NULL || _ins != NULL);
+		assert(_in != NULL || _inf != NULL || _ins != NULL || _gzin!=NULL);
 		int c = peek();
 		if(c != -1) {
 			_cur++;
@@ -89,6 +96,7 @@ public:
 		_in = in;
 		_inf = NULL;
 		_ins = NULL;
+		_gzin = NULL;
 		_cur = BUF_SZ;
 		_buf_sz = BUF_SZ;
 		_done = false;
@@ -101,6 +109,7 @@ public:
 		_in = NULL;
 		_inf = __inf;
 		_ins = NULL;
+		_gzin = NULL;
 		_cur = BUF_SZ;
 		_buf_sz = BUF_SZ;
 		_done = false;
@@ -113,11 +122,21 @@ public:
 		_in = NULL;
 		_inf = NULL;
 		_ins = __ins;
+		_gzin = NULL;
 		_cur = BUF_SZ;
 		_buf_sz = BUF_SZ;
 		_done = false;
 	}
 
+	void newFile(gzFile* __gzin) {
+		_in = NULL;
+		_inf = NULL;
+		_ins = NULL;
+		_gzin = __gzin;
+		_cur = BUF_SZ;
+		_buf_sz = BUF_SZ;
+		_done = false;
+	}
 	/**
 	 * Restore state as though we just started reading the input
 	 * stream.
@@ -129,8 +148,12 @@ public:
 		} else if(_ins != NULL) {
 			_ins->clear();
 			_ins->seekg(0, std::ios::beg);
-		} else {
+		} else if (_in != NULL){
 			rewind(_in);
+		} else if (_gzin != NULL){
+			gzrewind(*_gzin);
+		} else {
+			
 		}
 		_cur = BUF_SZ;
 		_buf_sz = BUF_SZ;
@@ -143,7 +166,7 @@ public:
 	 * Occasionally we'll need to read in a new buffer's worth of data.
 	 */
 	int peek() {
-		assert(_in != NULL || _inf != NULL || _ins != NULL);
+		assert(_in != NULL || _inf != NULL || _ins != NULL || _gzin != NULL);
 		assert_leq(_cur, _buf_sz);
 		if(_cur == _buf_sz) {
 			if(_done) {
@@ -159,9 +182,11 @@ public:
 				} else if(_ins != NULL) {
 					_ins->read((char*)_buf, BUF_SZ);
 					_buf_sz = _ins->gcount();
-				} else {
-					assert(_in != NULL);
+				} else if (_in != NULL){
 					_buf_sz = fread(_buf, 1, BUF_SZ, _in);
+				} else {
+					assert (_gzin != NULL);
+					_buf_sz = gzread(*_gzin, _buf, BUF_SZ);
 				}
 				_cur = 0;
 				if(_buf_sz == 0) {
@@ -319,6 +344,7 @@ private:
 		_in = NULL;
 		_inf = NULL;
 		_ins = NULL;
+		_gzin = NULL;
 		_cur = _buf_sz = BUF_SZ;
 		_done = false;
 		_lastn_cur = 0;
@@ -329,12 +355,14 @@ private:
 	FILE     *_in;
 	std::ifstream *_inf;
 	std::istream  *_ins;
+	gzFile *_gzin;
 	size_t    _cur;
 	size_t    _buf_sz;
 	bool      _done;
 	uint8_t   _buf[BUF_SZ]; // (large) input buffer
 	size_t    _lastn_cur;
 	char      _lastn_buf[LASTN_BUF_SZ]; // buffer of the last N chars dispensed
+
 };
 
 /**
