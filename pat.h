@@ -21,6 +21,7 @@
 #include "search_globals.h"
 
 #include <zlib.h>
+#include <bzlib.h>
 /**
  * Classes and routines for reading reads from various input sources.
  */
@@ -1652,16 +1653,31 @@ protected:
 		while(filecur_ < infiles_.size()) {
 			// Open read
 			FILE *in = NULL;
-			gzFile* gzin = new gzFile; // TODO: to delete this...
+			gzFile* gzin = NULL;
+			BZFILE* bz2in = NULL;
 			if(infiles_[filecur_] == "-") {
 				in = stdin;
 			} else if (infiles_[filecur_].substr (infiles_[filecur_].size() - 3) == ".gz") { // reading .gz file
+				gzin = new gzFile; // TODO: to delete this...
 			 	*gzin = gzopen (infiles_[filecur_].c_str(), "r");
 				if (*gzin == Z_NULL) {
 					cerr << "cannot gzopen file " << infiles_[filecur_] << endl;
 					exit (1);
 				}
 				fb_.newFile(gzin);
+			} else if (infiles_[filecur_].substr (infiles_[filecur_].size() - 4) == ".bz2") { // reading .bz2 file
+				in = fopen(infiles_[filecur_].c_str(), "rb");
+				if (in==NULL) {
+					cerr << "Warning: Could not open read file \"" << infiles_[filecur_] << "\" for reading; skipping..." << endl;
+					exit(1);
+				}
+				int bzError;
+				bz2in = BZ2_bzReadOpen(&bzError, in, 0, 0, NULL, 0);
+				if (bzError != BZ_OK) {
+					cerr << "cannot bz2open file " << infiles_[filecur_] << endl;
+					exit (1);
+				}
+				fb_.newFile(bz2in);
 			} else if((in = fopen(infiles_[filecur_].c_str(), "rb")) == NULL) {
 				if(!errs_[filecur_]) {
 					cerr << "Warning: Could not open read file \"" << infiles_[filecur_] << "\" for reading; skipping..." << endl;
@@ -1670,7 +1686,7 @@ protected:
 				filecur_++;
 				continue;
 			}
-			if (in) fb_.newFile(in);
+			if (in && !bz2in) fb_.newFile(in);
 			// Open quality /// not gonna support gzip for separated quality file...
 			if(!qinfiles_.empty()) {
 				FILE *in;

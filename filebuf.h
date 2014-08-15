@@ -15,7 +15,8 @@
 #include <stdexcept>
 #include "assert_helpers.h"
 
-#include "zlib.h"
+#include <zlib.h>
+#include <bzlib.h>
 /**
  * Simple wrapper for a FILE*, istream or ifstream that reads it in
  * chunks (with fread) and keeps those chunks in a buffer.  It also
@@ -51,8 +52,14 @@ public:
 		_gzin = gzin;
 		assert(_gzin!=NULL);
 	}
+	
+	FileBuf(BZFILE* bz2in) {
+		init ();
+		_bz2in = bz2in;
+		assert(_bz2in!=NULL);
+	}
 	bool isOpen() {
-		return _in != NULL || _inf != NULL || _ins != NULL || _gzin!=NULL;
+		return _in != NULL || _inf != NULL || _ins != NULL || _gzin!=NULL || _bz2in!=NULL;
 	}
 
 	/**
@@ -63,8 +70,11 @@ public:
 			fclose(_in);
 		} else if(_inf != NULL) {
 			_inf->close();
-		} else {
+		} else if (_gzin!=NULL){
 			gzclose(*_gzin);
+		} else if (_bz2in!=NULL) {
+			BZ2_bzclose(_bz2in);
+		} else {
 			// can't close _ins
 		}
 	}
@@ -73,7 +83,7 @@ public:
 	 * Get the next character of input and advance.
 	 */
 	int get() {
-		assert(_in != NULL || _inf != NULL || _ins != NULL || _gzin!=NULL);
+		assert(_in != NULL || _inf != NULL || _ins != NULL || _gzin!=NULL || _bz2in!=NULL);
 		int c = peek();
 		if(c != -1) {
 			_cur++;
@@ -97,6 +107,7 @@ public:
 		_inf = NULL;
 		_ins = NULL;
 		_gzin = NULL;
+		_bz2in = NULL;
 		_cur = BUF_SZ;
 		_buf_sz = BUF_SZ;
 		_done = false;
@@ -110,6 +121,7 @@ public:
 		_inf = __inf;
 		_ins = NULL;
 		_gzin = NULL;
+		_bz2in = NULL;
 		_cur = BUF_SZ;
 		_buf_sz = BUF_SZ;
 		_done = false;
@@ -123,6 +135,7 @@ public:
 		_inf = NULL;
 		_ins = __ins;
 		_gzin = NULL;
+		_bz2in = NULL;
 		_cur = BUF_SZ;
 		_buf_sz = BUF_SZ;
 		_done = false;
@@ -133,10 +146,23 @@ public:
 		_inf = NULL;
 		_ins = NULL;
 		_gzin = __gzin;
+		_bz2in = NULL;
 		_cur = BUF_SZ;
 		_buf_sz = BUF_SZ;
 		_done = false;
 	}
+	
+	void newFile(BZFILE* __bz2zin) {
+		_in = NULL;
+		_inf = NULL;
+		_ins = NULL;
+		_gzin = NULL;
+		_bz2in = __bz2zin;
+		_cur = BUF_SZ;
+		_buf_sz = BUF_SZ;
+		_done = false;
+	}
+	
 	/**
 	 * Restore state as though we just started reading the input
 	 * stream.
@@ -152,8 +178,9 @@ public:
 			rewind(_in);
 		} else if (_gzin != NULL){
 			gzrewind(*_gzin);
-		} else {
-			
+		} else if (_bz2in != NULL){
+			/* seems that this function is never called. so I'll be sloppy here */
+			fprintf (stderr, "cannot reset bzip2 file in %s, %d of %s\n", __func__, __LINE__, __FILE__);
 		}
 		_cur = BUF_SZ;
 		_buf_sz = BUF_SZ;
@@ -166,7 +193,7 @@ public:
 	 * Occasionally we'll need to read in a new buffer's worth of data.
 	 */
 	int peek() {
-		assert(_in != NULL || _inf != NULL || _ins != NULL || _gzin != NULL);
+		assert(_in != NULL || _inf != NULL || _ins != NULL || _gzin != NULL || _bz2in!=NULL);
 		assert_leq(_cur, _buf_sz);
 		if(_cur == _buf_sz) {
 			if(_done) {
@@ -184,9 +211,13 @@ public:
 					_buf_sz = _ins->gcount();
 				} else if (_in != NULL){
 					_buf_sz = fread(_buf, 1, BUF_SZ, _in);
-				} else {
-					assert (_gzin != NULL);
+				} else if (_gzin != NULL){
 					_buf_sz = gzread(*_gzin, _buf, BUF_SZ);
+				} else if (_bz2in != NULL) {
+					int bzError;
+					_buf_sz = BZ2_bzRead(&bzError, _bz2in, _buf, BUF_SZ);
+				} else {
+					
 				}
 				_cur = 0;
 				if(_buf_sz == 0) {
@@ -345,6 +376,7 @@ private:
 		_inf = NULL;
 		_ins = NULL;
 		_gzin = NULL;
+		_bz2in = NULL;
 		_cur = _buf_sz = BUF_SZ;
 		_done = false;
 		_lastn_cur = 0;
@@ -356,6 +388,7 @@ private:
 	std::ifstream *_inf;
 	std::istream  *_ins;
 	gzFile *_gzin;
+	BZFILE *_bz2in;
 	size_t    _cur;
 	size_t    _buf_sz;
 	bool      _done;
